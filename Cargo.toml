@@ -1,0 +1,15 @@
+[package]
+name = "deentry"
+authors = ["Gijs Burghoorn <me@gburghoorn.com"]
+description = "Interaction layer for FreeDesktop Desktop Entry files with a permissive license"
+version = "0.1.0"
+
+edition = "2021"
+
+repository = "https://github.com/coastalwhite/deentry"
+homepage = "https://github.com/coastalwhite/deentry"
+
+readme = "README.md"
+license = "MIT or APACHE"
+
+[dependencies]
