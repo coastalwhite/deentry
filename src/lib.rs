@@ -5,6 +5,29 @@ use std::ops::Range;
 use std::slice::{Iter, IterMut};
 use std::str::Lines;
 
+/// A Desktop Entry File
+///
+/// The structure that contains a `.desktop` or service file. This structure is divided into
+/// groups. The groups can be accessed by calling the [`iter`], [`iter_mut`] or [`into_iter`]
+/// functions. A Desktop Entry File can be parsed from a `&str` by calling the
+/// [`DesktopEntry::try_from`] function.
+///
+/// # Examples
+///
+/// ## Parsing a Desktop Entry
+///
+/// ```rust
+/// use deentry::DesktopEntry;
+///
+/// let desktop_entry = r#"
+/// [Desktop Entry]
+/// Name=CoolApplication
+/// Exec=/path/to/app
+/// "#;
+///
+/// let desktop_entry = DesktopEntry::try_from(desktop_entry)?;
+/// # Ok::<(), deentry::LinedError<deentry::GroupParseError>>(())
+/// ```
 #[derive(Debug, Clone)]
 pub struct DesktopEntry<'a> {
     groups: Vec<DesktopEntryGroup<'a>>,
