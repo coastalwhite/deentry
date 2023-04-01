@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::Display;
 use std::num::ParseFloatError;
 use std::ops::Range;
@@ -23,9 +24,9 @@ struct DesktopEntryGroupEntry<'a> {
     value: EntryValue<'a>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EntryValue<'a> {
-    content: &'a str,
+    content: Cow<'a, str>,
     has_locale: bool,
 }
 
@@ -53,6 +54,8 @@ pub enum EntryParseError {
     Header,
     NoEquals,
     InvalidKey,
+    EscapedIntoNonExistant,
+    EscapedIntoHeader,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,18 +159,23 @@ impl<'a> DesktopEntryGroup<'a> {
 
         let mut entries = Vec::new();
         loop {
-            let Some(line) = lines.next() else {
-                break;
-            };
+            let mut sub_lines = lines.clone();
 
-            match DesktopEntryGroupEntry::from_line(line) {
+            if lines.clone().next().is_none() {
+                break;
+            }
+
+            match DesktopEntryGroupEntry::from_lines(&mut sub_lines, &mut current_line_nr) {
                 Ok(entry) => entries.push((current_line_nr, entry)),
-                Err(EntryParseError::Header) => break,
+                Err(EntryParseError::Header) => {
+                    current_line_nr -= 1;
+                    break;
+                },
                 Err(err) if err.is_empty_line() => {}
                 Err(err) => return Err(GroupParseError::EntryError(err).at_line(current_line_nr)),
             }
 
-            current_line_nr += 1;
+            *lines = sub_lines;
         }
 
         Ok(Self {
@@ -209,8 +217,12 @@ fn group_header_from_line(line: &str) -> Result<&str, GroupHeaderParseError> {
 }
 
 impl<'a> DesktopEntryGroupEntry<'a> {
-    fn from_line(line: &'a str) -> Result<Self, EntryParseError> {
-        debug_assert!(!line.contains('\n'));
+    fn from_lines(
+        lines: &mut Lines<'a>,
+        current_line_nr: &mut usize,
+    ) -> Result<Self, EntryParseError> {
+        let line = lines.next().ok_or(EntryParseError::Empty)?;
+        *current_line_nr += 1;
 
         if line.trim_start().is_empty() {
             return Err(EntryParseError::Empty);
@@ -253,8 +265,34 @@ impl<'a> DesktopEntryGroupEntry<'a> {
             return Err(EntryParseError::InvalidKey);
         }
 
+        // Extend line if it ends with a '\'
+        if !value.ends_with('\\') {
+            let value = EntryValue {
+                content: Cow::Borrowed(value),
+                has_locale: locale.is_some(),
+            };
+
+            return Ok(Self { locale, key, value });
+        }
+
+        let mut value = String::from(value);
+        while value.ends_with('\\') {
+            let line = lines
+                .next()
+                .ok_or(EntryParseError::EscapedIntoNonExistant)?;
+            *current_line_nr += 1;
+
+            if line.starts_with('[') {
+                return Err(EntryParseError::EscapedIntoHeader);
+            }
+
+            value.pop(); // Removes '\'
+            value.push(' ');
+            value.push_str(line.trim_start());
+        }
+
         let value = EntryValue {
-            content: value,
+            content: Cow::Owned(value),
             has_locale: locale.is_some(),
         };
 
@@ -287,7 +325,7 @@ impl<'a> EntryValue<'a> {
             .map_err(|err| ValueNumericError::FloatParseError(err))
     }
 
-    pub fn as_string(self) -> Result<&'a str, ValueStringError> {
+    pub fn as_string(&'a self) -> Result<&'a str, ValueStringError> {
         if self.has_locale {
             return Err(ValueStringError::HasLocale);
         }
@@ -302,11 +340,11 @@ impl<'a> EntryValue<'a> {
             return Err(ValueStringError::ControlCharacters);
         }
 
-        Ok(line)
+        Ok(&line)
     }
 
-    pub fn as_localestring(self) -> &'a str {
-        self.content.trim()
+    pub fn as_localestring(&'a self) -> &'a str {
+        &self.content.trim()
     }
 }
 
@@ -387,6 +425,12 @@ impl Display for EntryParseError {
             Header => f.write_str("Line contains a Group Header."),
             NoEquals => f.write_str("Line does not contain a '='."),
             InvalidKey => f.write_str("Entry Key contains invalid characters."),
+            EscapedIntoNonExistant => {
+                f.write_str("Entry Value escapes end of line, but there is no next line")
+            }
+            EscapedIntoHeader => {
+                f.write_str("Entry Value escapes end of line, but next line is a header")
+            }
         }
     }
 }
@@ -409,9 +453,10 @@ mod tests {
     #[test]
     fn desktop_entry_group_entry_from_line() {
         macro_rules! assert_entry_eq {
-            ($line:literal => $key:literal, $value:literal $(, $locale:literal)? $(,)?) => {
-                let entry = DesktopEntryGroupEntry::from_line($line);
-                assert!(entry.is_ok(), "Entry formed from '{}' is Err", $line);
+            ($lines:literal => $key:literal, $value:literal $(, $locale:literal)? $(,)?) => {
+                let mut lines = $lines.lines();
+                let entry = DesktopEntryGroupEntry::from_lines(&mut lines, &mut 0);
+                assert!(entry.is_ok(), "Entry formed from '{}' is Err", $lines);
                 let entry = entry.unwrap();
                 assert_eq!(&entry.key, &$key);
                 assert_eq!(&entry.value.content, &$value);
@@ -422,9 +467,10 @@ mod tests {
                 )?
                 assert_eq!(entry.locale, locale);
             };
-            ($line:literal => ! $err:ident) => {
-                let entry = DesktopEntryGroupEntry::from_line($line);
-                assert!(entry.is_err(), "Entry formed from '{}' is Ok", $line);
+            ($lines:literal => ! $err:ident) => {
+                let mut lines = $lines.lines();
+                let entry = DesktopEntryGroupEntry::from_lines(&mut lines, &mut 0);
+                assert!(entry.is_err(), "Entry formed from '{}' is Ok", $lines);
                 let entry = entry.unwrap_err();
                 assert_eq!(entry, <EntryParseError>::$err);
             };
@@ -443,7 +489,13 @@ mod tests {
         assert_entry_eq!("a*=" => ! InvalidKey);
         assert_entry_eq!("*=c" => ! InvalidKey);
 
+        assert_entry_eq!("a=b\\" => ! EscapedIntoNonExistant);
+        assert_entry_eq!("a=b\\\n[" => ! EscapedIntoHeader);
+
         assert_entry_eq!("a=b" => "a", "b");
+        assert_entry_eq!("a=b\\\nc" => "a", "b c");
+        assert_entry_eq!("a=b\\\nc\\\nd" => "a", "b c d");
+
         assert_entry_eq!("a = b" => "a", "b");
         assert_entry_eq!("abc=def" => "abc", "def");
         assert_entry_eq!("Exec=/usr/bin/lemurs" => "Exec", "/usr/bin/lemurs");
