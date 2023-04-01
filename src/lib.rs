@@ -261,7 +261,17 @@ impl<'a> DesktopEntryGroupEntry<'a> {
             (key, None)
         };
 
-        if key.contains(|c: char| !c.is_ascii_alphanumeric() && c != '-') {
+        let category_length = if let Some(category_length) = key.find('/') {
+            if !key[category_length + 1..].is_ascii() {
+                return Err(EntryParseError::InvalidKey);
+            }
+
+            category_length
+        } else {
+            key.len()
+        };
+
+        if key[..category_length].contains(|c: char| !c.is_ascii_alphanumeric() && c != '-') {
             return Err(EntryParseError::InvalidKey);
         }
 
