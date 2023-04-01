@@ -458,6 +458,11 @@ impl<E: std::error::Error> std::error::Error for LinedError<E> {}
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::path::Path;
+
+    use regex::Regex;
+
     use super::*;
 
     #[test]
@@ -612,5 +617,132 @@ Exec=/usr/bin/lemurs
 key = value
             "# => "Desktop Entry", 5, [("abc", "xyz"), ("Exec", "/usr/bin/lemurs")]
         );
+    }
+
+    #[test]
+    fn file_from_lines() {
+        let desktop_entry = DesktopEntry::try_from(
+            r#"
+[Desktop Entry]
+abc = xyz
+Exec=/usr/bin/lemurs
+
+[Other Group]
+key = value
+            "#,
+        );
+        assert!(
+            desktop_entry.is_ok(),
+            "{err}",
+            err = desktop_entry.unwrap_err()
+        );
+    }
+
+    fn assert_all_files_in_directory(dir: &Path, regex: Option<&Regex>) -> u64 {
+        let mut count = 0;
+
+        assert!(dir.is_dir());
+
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+
+            let path = entry.path();
+            if path.is_dir() {
+                count += assert_all_files_in_directory(&path, regex);
+            } else {
+                if let Some(regex) = regex {
+                    if regex.is_match(&path.display().to_string()) {
+                        continue;
+                    }
+                }
+
+                count += 1;
+
+                let entry_content = std::fs::read_to_string(path.clone()).unwrap();
+                let desktop_entry = DesktopEntry::try_from(&entry_content[..]);
+
+                if let Err(err) = desktop_entry {
+                    println!("Error = {err}");
+                    println!("Path = {}", path.display());
+                    println!("Content = '''\n{entry_content}\n'''");
+
+                    assert!(false);
+                }
+            }
+        }
+
+        count
+    }
+
+    #[test]
+    #[ignore]
+    fn parse_xsessions() {
+        let path = Path::new("/usr/share/xsessions");
+
+        if !path.exists() {
+            return;
+        }
+
+        let count = assert_all_files_in_directory(path, None);
+        println!("Checked {count} files");
+    }
+
+    #[test]
+    #[ignore]
+    fn parse_wayland_sessions() {
+        let path = Path::new("/usr/share/wayland-sessions");
+
+        if !path.exists() {
+            return;
+        }
+
+        let count = assert_all_files_in_directory(path, None);
+        println!("Checked {count} files");
+    }
+
+    #[test]
+    #[ignore]
+    fn parse_service_files() {
+        let path = Path::new("/usr/lib/systemd/system");
+
+        if !path.exists() {
+            return;
+        }
+
+        let regex = Regex::new(r"\.conf$").unwrap();
+        let count = assert_all_files_in_directory(path, Some(&regex));
+        println!("Checked {count} files");
+    }
+
+    #[test]
+    #[ignore]
+    fn parse_share_application_files() {
+        let path = Path::new("/usr/share/applications");
+
+        if !path.exists() {
+            return;
+        }
+
+        let regex = Regex::new(r"\.conf$").unwrap();
+        let count = assert_all_files_in_directory(path, Some(&regex));
+        println!("Checked {count} files");
+    }
+
+    #[test]
+    #[ignore]
+    fn parse_local_application_files() {
+        let path = format!(
+            "{home}/.local/share/applications",
+            home = env::var("HOME").unwrap()
+        );
+        let path = Path::new(&path);
+
+        if !path.exists() {
+            return;
+        }
+
+        let regex = Regex::new(r"\.conf$").unwrap();
+        let count = assert_all_files_in_directory(path, Some(&regex));
+        println!("Checked {count} files");
     }
 }

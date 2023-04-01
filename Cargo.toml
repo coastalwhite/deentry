@@ -13,3 +13,6 @@ readme = "README.md"
 license = "MIT or APACHE"
 
 [dependencies]
+
+[dev-dependencies]
+regex = "1.7.3"
