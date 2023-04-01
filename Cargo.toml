@@ -2,7 +2,7 @@
 name = "deentry"
 authors = ["Gijs Burghoorn <me@gburghoorn.com"]
 description = "Interaction layer for FreeDesktop Desktop Entry files with a permissive license"
-version = "0.1.0"
+version = "0.0.1"
 
 edition = "2021"
 
