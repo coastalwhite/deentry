@@ -13,7 +13,7 @@ repository = "https://github.com/coastalwhite/deentry"
 homepage = "https://github.com/coastalwhite/deentry"
 
 readme = "README.md"
-license = "MIT OR APACHE"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 
