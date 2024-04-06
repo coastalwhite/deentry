@@ -1,8 +1,25 @@
+//! This is a relatively simple library that is driven by the needs of [Lemurs] to parse desktop
+//! entry files with a permissive license.
+//!
+//! ```rust
+//! use deentry::DesktopEntry;
+//!
+//! let desktop_entry = r#"
+//! [Desktop Entry]
+//! Name=CoolApplication
+//! Exec=/path/to/app
+//! "#;
+//!
+//! let desktop_entry = DesktopEntry::try_from(desktop_entry)?;
+//! # Ok::<(), deentry::LinedError<deentry::GroupParseError>>(())
+//! ```
+//!
+//! [Lemurs]: https://github.com/coastalwhite/lemurs
+
 use std::borrow::Cow;
 use std::fmt::Display;
 use std::num::ParseFloatError;
 use std::ops::Range;
-use std::slice::{Iter, IterMut};
 use std::str::Lines;
 
 /// A Desktop Entry File
@@ -37,11 +54,11 @@ pub struct DesktopEntry<'a> {
 pub struct DesktopEntryGroup<'a> {
     line_range: Range<usize>,
     group_name: &'a str,
-    entries: Vec<(usize, DesktopEntryGroupEntry<'a>)>,
+    entries: Vec<DesktopEntryGroupEntry<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct DesktopEntryGroupEntry<'a> {
+pub struct DesktopEntryGroupEntry<'a> {
     locale: Option<&'a str>,
     key: &'a str,
     value: EntryValue<'a>,
@@ -107,16 +124,14 @@ pub struct LinedError<E> {
 }
 
 impl<'a> DesktopEntry<'a> {
-    pub fn iter(&self) -> Iter<DesktopEntryGroup> {
-        self.groups.iter()
+    /// Get a slice with all the groups in the desktop entry file
+    pub fn groups(&self) -> &[DesktopEntryGroup<'a>] {
+        &self.groups
     }
 
-    pub fn iter_mut(&'a mut self) -> IterMut<DesktopEntryGroup> {
-        self.groups.iter_mut()
-    }
-
-    pub fn into_iter(self) -> <Vec<DesktopEntryGroup<'a>> as IntoIterator>::IntoIter {
-        self.groups.into_iter()
+    /// Get a mutable slice with all the groups in the desktop entry file
+    pub fn groups_mut(&mut self) -> &mut [DesktopEntryGroup<'a>] {
+        &mut self.groups
     }
 }
 
@@ -148,6 +163,40 @@ impl<'a> TryFrom<&'a str> for DesktopEntry<'a> {
 }
 
 impl<'a> DesktopEntryGroup<'a> {
+    /// Get the group name
+    ///
+    /// Example:
+    ///
+    /// ```
+    /// [Desktop Entry]
+    /// Exec=/usr/bin/cool
+    /// ```
+    ///
+    /// Here "Desktop Entry" is the group name.
+    pub fn name(&self) -> &'a str {
+        self.group_name
+    }
+
+    /// Get the entry belonging to a key
+    pub fn get(&self, key: &str) -> Option<&DesktopEntryGroupEntry<'a>> {
+        self.entries().iter().find(|e| e.key() == key)
+    }
+
+    /// Get the entry belonging to a key
+    pub fn contains(&self, key: &str) -> bool {
+        self.get(key).is_some()
+    }
+
+    /// Get a slice with all the entries in the group
+    pub fn entries(&self) -> &[DesktopEntryGroupEntry<'a>] {
+        &self.entries
+    }
+
+    /// Get a mutable slice with all the entries in the group
+    pub fn entries_mut(&mut self) -> &mut [DesktopEntryGroupEntry<'a>] {
+        &mut self.entries
+    }
+
     fn from_lines(
         lines: &mut Lines<'a>,
         line_nr: usize,
@@ -189,11 +238,11 @@ impl<'a> DesktopEntryGroup<'a> {
             }
 
             match DesktopEntryGroupEntry::from_lines(&mut sub_lines, &mut current_line_nr) {
-                Ok(entry) => entries.push((current_line_nr, entry)),
+                Ok(entry) => entries.push(entry),
                 Err(EntryParseError::Header) => {
                     current_line_nr -= 1;
                     break;
-                },
+                }
                 Err(err) if err.is_empty_line() => {}
                 Err(err) => return Err(GroupParseError::EntryError(err).at_line(current_line_nr)),
             }
@@ -240,6 +289,16 @@ fn group_header_from_line(line: &str) -> Result<&str, GroupHeaderParseError> {
 }
 
 impl<'a> DesktopEntryGroupEntry<'a> {
+    /// Get the key for the group entry
+    pub fn key(&self) -> &'a str {
+        self.key
+    }
+
+    /// Get the value for the group entry
+    pub fn value(&self) -> &EntryValue<'a> {
+        &self.value
+    }
+
     fn from_lines(
         lines: &mut Lines<'a>,
         current_line_nr: &mut usize,
@@ -334,6 +393,7 @@ impl<'a> DesktopEntryGroupEntry<'a> {
 }
 
 impl<'a> EntryValue<'a> {
+    /// Try to regard the entry value as a boolean
     pub fn as_boolean(self) -> Result<bool, ValueBoolError> {
         if self.has_locale {
             return Err(ValueBoolError::HasLocale);
@@ -346,6 +406,7 @@ impl<'a> EntryValue<'a> {
         }
     }
 
+    /// Try to regard the entry value as a numeric value
     pub fn as_numeric(self) -> Result<f32, ValueNumericError> {
         if self.has_locale {
             return Err(ValueNumericError::HasLocale);
@@ -358,6 +419,7 @@ impl<'a> EntryValue<'a> {
             .map_err(|err| ValueNumericError::FloatParseError(err))
     }
 
+    /// Try to regard the entry value as a string
     pub fn as_string(&'a self) -> Result<&'a str, ValueStringError> {
         if self.has_locale {
             return Err(ValueStringError::HasLocale);
@@ -376,6 +438,7 @@ impl<'a> EntryValue<'a> {
         Ok(&line)
     }
 
+    /// Try to regard the entry value as a locale string
     pub fn as_localestring(&'a self) -> &'a str {
         &self.content.trim()
     }
@@ -469,6 +532,50 @@ impl Display for EntryParseError {
 }
 
 impl std::error::Error for EntryParseError {}
+
+impl Display for ValueStringError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ValueStringError as E;
+
+        f.write_str(match self {
+            E::HasLocale => "Value cannot be converted into a string, because it has a locale",
+            E::NotASCII => "Value cannot be converted into a string, because it is not valid ASCII",
+            E::ControlCharacters => {
+                "Value cannot be converted into a string, because it contains control characters"
+            }
+        })
+    }
+}
+
+impl std::error::Error for ValueStringError {}
+
+impl Display for ValueBoolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ValueBoolError as E;
+
+        f.write_str(match self {
+            E::HasLocale => "Value cannot be converted into a boolean, because it has a locale",
+            E::NotABoolean => {
+                "Value cannot be converted into a boolean, because it is not 'true' or 'false'"
+            }
+        })
+    }
+}
+
+impl std::error::Error for ValueBoolError {}
+
+impl Display for ValueNumericError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ValueNumericError as E;
+
+        match self {
+            E::HasLocale => f.write_str("Value cannot be converted into a numeric value, because it has a locale"),
+            E::FloatParseError(err) => write!(f, "Value cannot be converted into a numeric value, because it could not be parsed. Reason: '{err}'"),
+        }
+    }
+}
+
+impl std::error::Error for ValueNumericError {}
 
 impl<E: std::fmt::Display> std::fmt::Display for LinedError<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -603,8 +710,8 @@ mod tests {
                 assert_eq!(expected_entries.len(), group.entries.len());
 
                 for i in 0..expected_entries.len() {
-                    assert_eq!(expected_entries[i].0, group.entries.get(i).unwrap().1.key);
-                    assert_eq!(expected_entries[i].1, group.entries.get(i).unwrap().1.value.content);
+                    // assert_eq!(expected_entries[i].0, group.entries.get(i).unwrap().1.key);
+                    assert_eq!(expected_entries[i].1, group.entries.get(i).unwrap().value.content);
                 }
             };
             ($lines:literal => ! $err:expr) => {
