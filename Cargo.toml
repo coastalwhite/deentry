@@ -4,6 +4,9 @@ authors = ["Gijs Burghoorn <me@gburghoorn.com"]
 description = "Interaction layer for FreeDesktop Desktop Entry files with a permissive license"
 version = "0.0.1"
 
+keywords = ["desktop", "entry", "freedesktop", "linux", "applications"]
+categories = ["filesystem", "parsing"]
+
 edition = "2021"
 
 repository = "https://github.com/coastalwhite/deentry"
